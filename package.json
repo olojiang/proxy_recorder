@@ -1,0 +1,17 @@
+{
+  "name": "proxy-recorder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "sh -c 'port=${PROXY_PORT:-3333}; pids=$(lsof -ti tcp:$port 2>/dev/null || true); if [ -n \"$pids\" ]; then kill $pids; sleep 0.2; fi; PROXY_PORT=$port tsx watch src/server.ts'",
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test dist/**/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "tsx": "^4.16.2",
+    "typescript": "^5.4.5"
+  }
+}
