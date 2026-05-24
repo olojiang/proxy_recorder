@@ -1,39 +1,29 @@
 import http from "node:http";
 import https from "node:https";
 import fs from "node:fs";
+import path from "node:path";
 import type { Socket } from "node:net";
 import { config } from "./config.js";
 import { applyHostsBlock } from "./hosts.js";
 import { readRecentLogs } from "./logger.js";
-import { proxyConnectRequest, proxyHttpRequest } from "./proxy.js";
+import { proxyConnectRequest, proxyHttpRequest, proxyUpgradeRequest } from "./proxy.js";
 import { RequestRecorder } from "./recorder.js";
 import { HttpError, RuleStore } from "./rules.js";
 import { adminHtml } from "./ui.js";
 import type { RuleInput } from "./types.js";
 
 const store = new RuleStore(config.dataDir);
-const recorder = new RequestRecorder(`${config.dataDir}/recordings`);
+const recorder = new RequestRecorder(path.join(config.dataDir, "recordings"));
 
-const server = http.createServer(async (req, res) => {
-  try {
-    if (isAdminRequest(req)) {
-      await handleAdmin(req, res);
-      return;
-    }
+type LocalProtocol = "http" | "https";
 
-    await proxyHttpRequest(store, req, res, "http", recorder);
-  } catch (error) {
-    sendJsonError(res, error);
-  }
+const server = http.createServer((req, res) => {
+  void handleLocalRequest(req, res, "http");
 });
 
-server.on("connect", (req, socket, head) => {
-  const clientSocket = socket as Socket;
-  proxyConnectRequest(store, req, clientSocket, head).catch(() => {
-    socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
-    socket.destroy();
-  });
-});
+server.on("connect", handleConnectRequest);
+server.on("upgrade", (req, socket, head) => handleUpgradeRequest(req, socket as Socket, head, "http"));
+server.on("error", (error) => handleListenError(error, "HTTP proxy", config.proxyPort));
 
 server.listen(config.proxyPort, config.bindHost, () => {
   console.log(`Proxy Recorder listening on http://${config.bindHost}:${config.proxyPort}`);
@@ -51,18 +41,69 @@ if (config.httpsProxyPort || config.tlsCertPath || config.tlsKeyPath) {
       cert: fs.readFileSync(config.tlsCertPath),
       key: fs.readFileSync(config.tlsKeyPath)
     },
-    async (req, res) => {
-      try {
-        await proxyHttpRequest(store, req, res, "https", recorder);
-      } catch (error) {
-        sendJsonError(res, error);
-      }
+    (req, res) => {
+      void handleLocalRequest(req, res, "https");
     }
   );
 
+  httpsServer.on("connect", handleConnectRequest);
+  httpsServer.on("upgrade", (req, socket, head) =>
+    handleUpgradeRequest(req, socket as Socket, head, "https")
+  );
+  httpsServer.on("error", (error) =>
+    handleListenError(error, "HTTPS proxy", config.httpsProxyPort!)
+  );
+
   httpsServer.listen(config.httpsProxyPort, config.bindHost, () => {
-    console.log(`HTTPS host proxy listening on https://${config.bindHost}:${config.httpsProxyPort}`);
+    console.log(`HTTPS proxy listening on https://${config.bindHost}:${config.httpsProxyPort}`);
+    console.log(`HTTPS Admin UI: https://localhost:${config.httpsProxyPort}/admin`);
   });
+}
+
+async function handleLocalRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  protocol: LocalProtocol
+): Promise<void> {
+  try {
+    if (isAdminRequest(req)) {
+      await handleAdmin(req, res);
+      return;
+    }
+
+    await proxyHttpRequest(store, req, res, protocol, recorder);
+  } catch (error) {
+    sendJsonError(res, error);
+  }
+}
+
+function handleConnectRequest(req: http.IncomingMessage, socket: Socket, head: Buffer): void {
+  const clientSocket = socket as Socket;
+  proxyConnectRequest(store, req, clientSocket, head).catch(() => {
+    socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+    socket.destroy();
+  });
+}
+
+function handleUpgradeRequest(
+  req: http.IncomingMessage,
+  socket: Socket,
+  head: Buffer,
+  protocol: LocalProtocol
+): void {
+  proxyUpgradeRequest(store, req, socket, head, protocol, recorder).catch(() => {
+    socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+    socket.destroy();
+  });
+}
+
+function handleListenError(error: Error, label: string, port: number): void {
+  if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+    console.error(`${label} port ${port} is already in use.`);
+    console.error("Stop the existing process or set PROXY_PORT/HTTPS_PROXY_PORT to another port.");
+    process.exit(1);
+  }
+  throw error;
 }
 
 function isAdminRequest(req: http.IncomingMessage): boolean {

@@ -29,6 +29,75 @@ test("RuleStore normalizes and rejects duplicate hosts", async () => {
   );
 });
 
+test("RuleStore preserves explicit HTTP upstream targets", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "proxy-recorder-rules-"));
+  const store = new RuleStore(dir);
+
+  const created = await store.create({
+    host: "http-origin.test",
+    target: "http://origin.example.com/app"
+  });
+
+  assert.equal(created.target, "http://origin.example.com/app");
+});
+
+test("RuleStore rejects hosts with invalid label boundaries", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "proxy-recorder-rules-"));
+  const store = new RuleStore(dir);
+
+  for (const host of ["-bad.example", "bad-.example", "good.-bad.example", "good.bad-.example"]) {
+    await assert.rejects(
+      () =>
+        store.create({
+          host,
+          target: "https://origin.example.com"
+        }),
+      (error) => error instanceof HttpError && error.statusCode === 400,
+      host
+    );
+  }
+});
+
+test("RuleStore enforces host label and total length limits", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "proxy-recorder-rules-"));
+  const store = new RuleStore(dir);
+  const label63 = "a".repeat(63);
+  const label64 = "a".repeat(64);
+  const host253 = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(61)}`;
+  const host254 = `${host253}.e`;
+
+  await assert.doesNotReject(() =>
+    store.create({
+      host: `${label63}.example`,
+      target: "https://origin.example.com",
+      mountPath: "/one"
+    })
+  );
+  await assert.doesNotReject(() =>
+    store.create({
+      host: host253,
+      target: "https://origin.example.com",
+      mountPath: "/two"
+    })
+  );
+  await assert.rejects(
+    () =>
+      store.create({
+        host: `${label64}.example`,
+        target: "https://origin.example.com"
+      }),
+    (error) => error instanceof HttpError && error.statusCode === 400
+  );
+  await assert.rejects(
+    () =>
+      store.create({
+        host: host254,
+        target: "https://origin.example.com"
+      }),
+    (error) => error instanceof HttpError && error.statusCode === 400
+  );
+});
+
 test("RuleStore only returns enabled host matches", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "proxy-recorder-rules-"));
   const store = new RuleStore(dir);

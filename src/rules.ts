@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { ProxyRule, RuleInput } from "./types.js";
 
-const HOST_RE = /^(?=.{1,253}$)(?!-)[a-zA-Z0-9.-]+(?<!-)$/;
+const HOST_LABEL_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
 
 interface NormalizedRuleInput {
   host: string;
@@ -166,7 +166,7 @@ export function normalizeHost(host: string): string {
 
 function normalizeInput(input: RuleInput): NormalizedRuleInput {
   const host = normalizeHost(input.host);
-  if (!HOST_RE.test(host) || host.includes("..")) {
+  if (!isValidHost(host)) {
     throw new HttpError(400, "Invalid host");
   }
 
@@ -215,10 +215,18 @@ function normalizeOptionalHost(host: string | undefined): string | undefined {
   if (!normalized) {
     return undefined;
   }
-  if (!HOST_RE.test(normalized) || normalized.includes("..")) {
+  if (!isValidHost(normalized)) {
     throw new HttpError(400, "Invalid virtual host");
   }
   return normalized;
+}
+
+function isValidHost(host: string): boolean {
+  return (
+    host.length > 0 &&
+    host.length <= 253 &&
+    host.split(".").every((label) => HOST_LABEL_RE.test(label))
+  );
 }
 
 function pathStartsWithMount(requestPath: string, mountPath: string): boolean {

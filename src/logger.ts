@@ -31,10 +31,10 @@ export function accessLog(entry: Omit<AccessLogEntry, "ts">): void {
   void appendLine(line);
 }
 
-export async function readRecentLogs(limit = 200): Promise<AccessLogEntry[]> {
+export async function readRecentLogs(limit = 200, logPath = config.logPath): Promise<AccessLogEntry[]> {
   let raw: string;
   try {
-    raw = await fs.readFile(config.logPath, "utf8");
+    raw = await fs.readFile(logPath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
@@ -42,12 +42,21 @@ export async function readRecentLogs(limit = 200): Promise<AccessLogEntry[]> {
     throw error;
   }
 
-  return raw
-    .trim()
-    .split("\n")
-    .slice(-limit)
-    .map((line) => JSON.parse(line) as AccessLogEntry)
-    .reverse();
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 0;
+  if (safeLimit === 0 || raw.trim() === "") {
+    return [];
+  }
+
+  const entries: AccessLogEntry[] = [];
+  for (const line of raw.trim().split(/\r?\n/)) {
+    try {
+      entries.push(JSON.parse(line) as AccessLogEntry);
+    } catch {
+      // Keep the admin log view usable if a previous write was interrupted.
+    }
+  }
+
+  return entries.slice(-safeLimit).reverse();
 }
 
 async function appendLine(line: string): Promise<void> {

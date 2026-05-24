@@ -210,7 +210,7 @@ http://localhost:3333/pinefield.jing-lao-yuan/#/
 
 - `localhost:3333` 模式不需要写 hosts，也不需要管理员权限；macOS、Windows、Linux 都可以直接跑。
 - 如果要监听 80/443，macOS/Linux 通常需要管理员权限；Windows 也可能需要管理员终端或端口授权。
-- `HOSTS_PATH` 默认是 `/etc/hosts`，Windows 要写 hosts 时应显式配置为类似 `C:\Windows\System32\drivers\etc\hosts` 的路径，并用管理员权限启动。
+- `HOSTS_PATH` 默认按系统选择：macOS/Linux 是 `/etc/hosts`，Windows 是 `%SystemRoot%\System32\drivers\etc\hosts`；写真实 hosts 文件仍需要管理员权限。
 - `mkcert` 证书方式仍适合真实域名 HTTPS 拦截，但不是 localhost 路径挂载的必要条件。
 - 代码使用 Node 标准 `http/https/dns` 模块；`path.join` 只用于本地数据文件，不参与 URL 拼接，避免 Windows 路径分隔符影响代理 URL。
 
